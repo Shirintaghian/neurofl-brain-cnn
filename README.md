@@ -10,30 +10,23 @@ DataLoader at read time — **no preprocessing step and no derived dataset**.
 
 ---
 
-## Which file do I use?
-
-Two ClientApps ship. Pick one in `pyproject.toml` → `[tool.flwr.app.components]`
-→ `clientapp`:
-
-| Client | Reads | When to use |
-|---|---|---|
-| **`client_app_raw.py`** (default) | the site's **raw BIDS tree** directly | the normal case — no prep needed on the node |
-| `client_app.py` | prepared **`.npy`** volumes (from `prepare_raw.py`) | if a site pre-materialises volumes to a derived dataset |
-
-Both pair with the same `server_app.py`.
-
 ## Files
+
+Four files, mirroring a standard NeuroFL app (`shared` + client + server +
+config). `shared.py` plays the role a tabular app's `shared.py` does — it just
+also carries the 3D CNN and the raw-BIDS volume loader, which are bigger than a
+CSV model, so they live here rather than in the ClientApp.
 
 | File | Role |
 |---|---|
-| `server_app.py` | Flower ServerApp, FedAvg (NeuroFL `@app.main` / `strategy.start`) |
-| `client_app_raw.py` | ClientApp — **reads raw BIDS** (default) |
-| `client_app.py` | ClientApp — reads prepared `.npy` arrays |
-| `model.py` | `BrainCNN` — 4-block 3D residual CNN, GroupNorm, ~900k params |
-| `raw_dataset.py` | Reads a raw BIDS tree; resize → clip → z-score per scan |
-| `prepare_raw.py` | *Optional* — writes volumes to a derived `.npy` dataset |
-| `train_raw.py` | Local (non-federated) sanity check against one dataset |
-| `pyproject.toml` | Flower app config + platform-injected keys |
+| `shared.py` | **The model + data + train/eval** — `BrainCNN` (3D residual CNN, GroupNorm, ~905k params), `RawBIDSDataset` (reads a raw BIDS tree; resize → clip → z-score per scan), and the `train_one_epoch` / `evaluate` / `make_loss` helpers. |
+| `client_app.py` | ClientApp — `@app.train` / `@app.evaluate`; reads the site's raw BIDS tree and calls into `shared`. |
+| `server_app.py` | ServerApp — FedAvg over the sites (`@app.main` / `strategy.start`). |
+| `pyproject.toml` | Flower app config (target, shape, rounds, hyperparameters). |
+
+To replicate: point each site's node at its raw dataset, set the knobs in
+`pyproject.toml` (see **Config**), build the app into a FAB, and submit it
+targeting your clients. Nothing else is needed.
 
 ---
 
@@ -49,9 +42,29 @@ Both pair with the same `server_app.py`.
 
 ### Run locally (sanity check, no federation)
 
-```bash
-python3 train_raw.py /data/nodeap --target age --epochs 40
-python3 train_raw.py /data/nodeap --target sex --epochs 40
+Everything you need is in `shared.py`, so you can smoke-test the model on one
+dataset before submitting — the same idea as a tabular `shared.py` benchmark:
+
+```python
+import torch
+from shared import (RawBIDSDataset, subject_split, BrainCNN,
+                    make_loss, train_one_epoch, evaluate)
+
+root, target = "/data/nodeap", "sex"          # or "age"
+full = RawBIDSDataset(root, target=target, shape=(64, 64, 64))
+tr_idx, va_idx = subject_split(full, seed=0)
+tr = torch.utils.data.DataLoader(
+    RawBIDSDataset(root, target, (64, 64, 64), indices=tr_idx, train=True),
+    batch_size=4, shuffle=True)
+va = torch.utils.data.DataLoader(
+    RawBIDSDataset(root, target, (64, 64, 64), indices=va_idx), batch_size=4)
+
+model = BrainCNN(task=target)
+opt = torch.optim.AdamW(model.parameters(), lr=3e-4)
+loss_fn = make_loss(target, full.labels[tr_idx])
+for epoch in range(40):
+    train_one_epoch(model, tr, opt, loss_fn=loss_fn)
+print(evaluate(model, va))
 ```
 
 ---

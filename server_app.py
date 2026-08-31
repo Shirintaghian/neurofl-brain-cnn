@@ -18,7 +18,7 @@ from flwr.serverapp import Grid, ServerApp
 from flwr.serverapp.strategy import FedAvg
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from model import BrainCNN
+from shared import BrainCNN
 
 app = ServerApp()
 

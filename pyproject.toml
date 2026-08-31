@@ -21,7 +21,7 @@ publisher = "neurofl"
 
 [tool.flwr.app.components]
 serverapp = "server_app:app"
-clientapp = "client_app_raw:app"
+clientapp = "client_app:app"
 
 [tool.flwr.app.config]
 # ── Keys the NeuroFL platform injects at launch via --run-config. They MUST be
