@@ -1,0 +1,60 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "neurofl-brain-cnn"
+version = "1.0.2"
+description = "3D CNN over raw BIDS T1w volumes, federated with Flower (NeuroFL)"
+dependencies = [
+  "flwr @ git+https://github.com/flwrlabs/flower.git@nsjail-superexec-app-sandbox-poc#subdirectory=framework",
+  "torch>=2.0",
+  "nibabel>=5.0",
+  "numpy>=1.24",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["."]
+
+[tool.flwr.app]
+publisher = "neurofl"
+
+[tool.flwr.app.components]
+serverapp = "server_app:app"
+clientapp = "client_app_raw:app"
+
+[tool.flwr.app.config]
+# ── Keys the NeuroFL platform injects at launch via --run-config. They MUST be
+# declared here (any default) or SuperLink rejects the run with
+# "Key '<name>' is not present in the main dictionary". These override at submit
+# time: set batch_size / learning_rate / local_epochs in the submission.
+neurofl-run-id = "unknown"
+local_epochs = 2
+batch_size = 4
+learning_rate = 3e-4
+
+# ── App knobs. On NeuroFL these are set HERE (edit + rebuild), because the
+# platform reserves num_rounds/num_clients/target_clients and passes them
+# separately — so rounds are controlled by `num-server-rounds` below.
+num-server-rounds = 10
+target = "sex"            # "age" (regression) | "sex" (binary classification)
+shape = "64,64,64"        # volume the CNN sees; full resolution. On a memory-tight
+                          # node without the sandbox fix, drop to 48.
+min-clients = 2
+# Stride of the first conv. 1 = full-resolution feature maps (best quality; needs
+# a node with the sandbox memory fix). Set to 2 on a memory-tight node to keep the
+# wide-channel feature maps at half resolution (the INPUT stays full-resolution;
+# only the features are coarser — a standard 3D-ResNet stem).
+stem-stride = 1
+
+# fast_load = full-resolution trilinear resample (best quality, slower).
+# Set to "1"/"true" for a coarse strided pre-downsample (several times faster,
+# negligible quality cost at these target shapes) — useful for large cohorts or
+# memory-tight nodes. See raw_dataset.to_volume.
+fast_load = "0"
+
+[tool.flwr.federations]
+default = "neurofl"
+
+[tool.flwr.federations.neurofl]
+address = "127.0.0.1:9093"
